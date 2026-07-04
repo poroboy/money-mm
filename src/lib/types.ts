@@ -54,6 +54,15 @@ export type Installment = BaseDocument & {
   note?: string
 }
 
+export type PaymentItemType = 'expense' | 'installment'
+export type PaymentRecord = BaseDocument & {
+  itemType: PaymentItemType
+  itemId: string
+  month: string
+  isPaid: boolean
+  paidAt?: Timestamp | null
+}
+
 export type UserSettings = {
   currency: 'THB'
   forecastMonths: 6 | 12 | 18 | 24

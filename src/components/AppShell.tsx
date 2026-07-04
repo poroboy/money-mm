@@ -1,10 +1,11 @@
-import { BarChart3, CalendarRange, CreditCard, HandCoins, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, WalletCards, X } from 'lucide-react'
+import { BarChart3, CalendarCheck2, CalendarRange, CreditCard, HandCoins, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, WalletCards, X } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const links = [
   { to: '/dashboard', label: 'ภาพรวม', icon: LayoutDashboard },
+  { to: '/payments', label: 'รายการที่ต้องจ่าย', icon: CalendarCheck2 },
   { to: '/incomes', label: 'รายรับ', icon: HandCoins },
   { to: '/expenses', label: 'รายจ่าย', icon: ReceiptText },
   { to: '/accounts', label: 'บัญชี / บัตร', icon: CreditCard },
