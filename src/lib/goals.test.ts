@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getSavingsGoalPlan } from './goals'
+import { applySavingsContribution, getSavingsGoalPlan } from './goals'
 import type { SavingsGoal } from './types'
 
 const goal: SavingsGoal = {
@@ -29,5 +29,12 @@ describe('savings goal plan', () => {
 
   it('marks unfinished past targets as overdue', () => {
     expect(getSavingsGoalPlan({ ...goal, targetMonth: '2026-06' }, '2026-07').isOverdue).toBe(true)
+  })
+
+  it('adds a quick contribution and completes the goal at its target', () => {
+    expect(applySavingsContribution(goal, 4000).savedAmount).toBe(16000)
+    const completed = applySavingsContribution({ ...goal, savedAmount: 59000 }, 5000)
+    expect(completed.savedAmount).toBe(60000)
+    expect(completed.status).toBe('completed')
   })
 })

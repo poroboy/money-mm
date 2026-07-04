@@ -34,3 +34,13 @@ export function getSavingsGoalPlan(goal: SavingsGoal, currentMonth: string): Sav
     isOverdue: monthDifference < 0 && remainingAmount > 0,
   }
 }
+
+export function applySavingsContribution(goal: SavingsGoal, contribution: number): SavingsGoal {
+  const targetAmount = safeMoney(goal.targetAmount)
+  const nextSavedAmount = Math.min(targetAmount, safeMoney(goal.savedAmount) + safeMoney(contribution))
+  return {
+    ...goal,
+    savedAmount: nextSavedAmount,
+    status: targetAmount > 0 && nextSavedAmount >= targetAmount ? 'completed' : goal.status,
+  }
+}

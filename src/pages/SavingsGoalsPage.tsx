@@ -4,7 +4,7 @@ import { Card, EmptyState, Field, Modal, PageTitle } from '../components/ui'
 import { useData } from '../context/DataContext'
 import { getCurrentMonth, getMonthlySummary, isValidMonth } from '../lib/forecast'
 import { money, monthLabel } from '../lib/format'
-import { getSavingsGoalPlan } from '../lib/goals'
+import { applySavingsContribution, getSavingsGoalPlan, type SavingsGoalPlan } from '../lib/goals'
 import type { SavingsGoal, SavingsGoalPriority, SavingsGoalStatus } from '../lib/types'
 
 const priorityLabels: Record<SavingsGoalPriority, string> = { high: 'สำคัญมาก', medium: 'ปานกลาง', low: 'ยืดหยุ่นได้' }
@@ -15,6 +15,7 @@ export function SavingsGoalsPage() {
   const data = useData()
   const currentMonth = getCurrentMonth()
   const [editing, setEditing] = useState<SavingsGoal | null | undefined>(undefined)
+  const [savingGoalId, setSavingGoalId] = useState('')
   const goalsWithPlans = useMemo(() => data.savingsGoals
     .map((goal) => ({ goal, plan: getSavingsGoalPlan(goal, currentMonth) }))
     .sort((a, b) => Number(a.goal.status !== 'active') - Number(b.goal.status !== 'active') || (a.goal.targetMonth || '').localeCompare(b.goal.targetMonth || '')), [data.savingsGoals, currentMonth])
@@ -28,6 +29,17 @@ export function SavingsGoalsPage() {
   const affordable = monthlyRequired <= Math.max(0, available)
   const close = () => setEditing(undefined)
   const deleteGoal = async (goal: SavingsGoal) => { if (window.confirm(`ลบเป้าหมาย “${goal.name}” ใช่ไหม?`)) await data.remove('savingsGoals', goal.id) }
+  const addContribution = async (goal: SavingsGoal, contribution: number) => {
+    setSavingGoalId(goal.id)
+    try {
+      const updated = applySavingsContribution(goal, contribution)
+      const { id, createdAt, updatedAt, ...payload } = updated
+      void id; void createdAt; void updatedAt
+      await data.save('savingsGoals', payload, goal.id)
+    } finally {
+      setSavingGoalId('')
+    }
+  }
 
   return <>
     <PageTitle title="วางแผนเป้าหมายการเงิน" detail="ตั้งเป้าหมาย แล้วให้ระบบคำนวณว่าควรเก็บเดือนละเท่าไร" action={<button className="btn-primary" onClick={() => setEditing(null)}><Plus size={18}/>เพิ่มเป้าหมาย</button>}/>
@@ -46,6 +58,7 @@ export function SavingsGoalsPage() {
         <div className="mt-6"><div className="mb-2 flex justify-between text-xs"><span className="text-slate-400">เก็บแล้ว {money(plan.savedAmount)}</span><span className="font-semibold text-slate-600">{Math.round(plan.progress * 100)}%</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-600 transition-all" style={{ width: `${Math.min(100, plan.progress * 100)}%` }}/></div></div>
         <div className="mt-5 grid grid-cols-3 gap-2"><GoalMetric label="ยังขาด" value={money(plan.remainingAmount)}/><GoalMetric label="เหลือเวลา" value={plan.monthsRemaining ? `${plan.monthsRemaining} เดือน` : 'ครบแล้ว'}/><GoalMetric label="เก็บ/เดือน" value={money(plan.monthlyRequired)}/></div>
         {goal.status === 'active' && plan.remainingAmount > 0 && <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">แนะนำเก็บประมาณ <strong>{money(plan.weeklyRequired)}/สัปดาห์</strong> หรือ {money(plan.monthlyRequired)}/เดือน</p>}
+        {goal.status === 'active' && plan.remainingAmount > 0 && <GoalContribution plan={plan} busy={savingGoalId === goal.id} onSave={(amount) => addContribution(goal, amount)}/>}
         {goal.note && <p className="mt-4 text-sm leading-relaxed text-slate-500">{goal.note}</p>}
       </Card>)}</div> : <Card className="p-6"><EmptyState title="ยังไม่มีเป้าหมายการเงิน" detail="ลองเริ่มจาก “เที่ยวจีนปีหน้า” แล้วใส่งบประมาณที่ต้องการ"/></Card>}
 
@@ -55,6 +68,18 @@ export function SavingsGoalsPage() {
 
 function Summary({ label, value, icon, tint }: { label: string; value: number; icon: React.ReactNode; tint: string }) { return <Card className="p-5"><div className="flex items-start justify-between"><div><p className="text-sm text-slate-400">{label}</p><p className="mt-2 text-2xl font-bold text-slate-900">{money(value)}</p></div><span className={`grid size-10 place-items-center rounded-2xl ${tint}`}>{icon}</span></div></Card> }
 function GoalMetric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] text-slate-400">{label}</p><p className="mt-1 text-sm font-bold text-slate-800">{value}</p></div> }
+
+function GoalContribution({ plan, busy, onSave }: { plan: SavingsGoalPlan; busy: boolean; onSave: (amount: number) => Promise<void> }) {
+  const [amount, setAmount] = useState('')
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const value = Number(amount)
+    if (!Number.isFinite(value) || value <= 0) return
+    await onSave(value)
+    setAmount('')
+  }
+  return <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4"><p className="mb-2 text-sm font-semibold text-slate-700">เพิ่มเงินที่เก็บครั้งนี้</p><form onSubmit={submit} className="grid gap-2 sm:grid-cols-[minmax(120px,1fr)_auto_auto]"><input aria-label="จำนวนเงินที่เก็บครั้งนี้" className="field" type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="พิมพ์จำนวนเงิน"/><button type="button" className="btn-secondary whitespace-nowrap" onClick={() => setAmount(String(Math.ceil(plan.monthlyRequired)))}>ใส่ตามคำแนะนำ {money(Math.ceil(plan.monthlyRequired))}</button><button type="submit" disabled={busy || !amount || Number(amount) <= 0} className="btn-primary whitespace-nowrap">{busy ? 'กำลังบันทึก…' : 'บันทึกเงินเก็บ'}</button></form></div>
+}
 
 function GoalModal({ value, onClose, onSave }: { value: SavingsGoal | null; onClose: () => void; onSave: (value: Omit<SavingsGoal, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void> }) {
   const defaultTarget = `${new Date().getFullYear() + 1}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
