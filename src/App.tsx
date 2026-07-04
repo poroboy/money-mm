@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { PaymentsPage } from './pages/PaymentsPage'
+import { SavingsGoalsPage } from './pages/SavingsGoalsPage'
 import { AccountsPage, ExpensesPage, IncomesPage, InstallmentsPage } from './pages/CrudPages'
 
 function ProtectedApp() {
@@ -23,6 +24,7 @@ export default function App() {
     <Route element={<ProtectedApp />}>
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/payments" element={<PaymentsPage />} />
+      <Route path="/goals" element={<SavingsGoalsPage />} />
       <Route path="/incomes" element={<IncomesPage />} />
       <Route path="/expenses" element={<ExpensesPage />} />
       <Route path="/accounts" element={<AccountsPage />} />

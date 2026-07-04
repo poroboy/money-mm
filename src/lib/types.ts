@@ -63,6 +63,18 @@ export type PaymentRecord = BaseDocument & {
   paidAt?: Timestamp | null
 }
 
+export type SavingsGoalPriority = 'high' | 'medium' | 'low'
+export type SavingsGoalStatus = 'active' | 'paused' | 'completed'
+export type SavingsGoal = BaseDocument & {
+  name: string
+  targetAmount: number
+  savedAmount: number
+  targetMonth: string
+  priority: SavingsGoalPriority
+  status: SavingsGoalStatus
+  note?: string
+}
+
 export type UserSettings = {
   currency: 'THB'
   forecastMonths: 6 | 12 | 18 | 24

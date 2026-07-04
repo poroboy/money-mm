@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import type { Account, Expense, Income, Installment, PaymentItemType, PaymentRecord, UserSettings } from '../lib/types'
+import type { Account, Expense, Income, Installment, PaymentItemType, PaymentRecord, SavingsGoal, UserSettings } from '../lib/types'
 import { useAuth } from './AuthContext'
 
-type CollectionName = 'incomes' | 'expenses' | 'accounts' | 'installments'
-type AnyEntity = Income | Expense | Account | Installment
+type CollectionName = 'incomes' | 'expenses' | 'accounts' | 'installments' | 'savingsGoals'
+type AnyEntity = Income | Expense | Account | Installment | SavingsGoal
 type EntityPayload = Omit<AnyEntity, 'id' | 'createdAt' | 'updatedAt'>
 
 type DataValue = {
@@ -14,6 +14,7 @@ type DataValue = {
   accounts: Account[]
   installments: Installment[]
   paymentRecords: PaymentRecord[]
+  savingsGoals: SavingsGoal[]
   settings: UserSettings
   loading: boolean
   error: string
@@ -33,13 +34,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [installments, setInstallments] = useState<Installment[]>([])
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecord[]>([])
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([])
   const [settings, setSettings] = useState<UserSettings>(defaults)
-  const [pending, setPending] = useState(6)
+  const [pending, setPending] = useState(7)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!user) return
-    setPending(6)
+    setPending(7)
     setError('')
     const root = ['users', user.uid] as const
     const subscribe = <T extends AnyEntity>(name: CollectionName, setter: (items: T[]) => void) =>
@@ -53,6 +55,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       subscribe<Expense>('expenses', setExpenses),
       subscribe<Account>('accounts', setAccounts),
       subscribe<Installment>('installments', setInstallments),
+      subscribe<SavingsGoal>('savingsGoals', setSavingsGoals),
       onSnapshot(collection(db, ...root, 'paymentRecords'), (snapshot) => {
         setPaymentRecords(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as PaymentRecord))
         setPending((value) => Math.max(0, value - 1))
@@ -69,7 +72,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [user])
 
   const value = useMemo<DataValue>(() => ({
-    incomes, expenses, accounts, installments, paymentRecords, settings, loading: pending > 0, error,
+    incomes, expenses, accounts, installments, paymentRecords, savingsGoals, settings, loading: pending > 0, error,
     save: async (name, payload, id) => {
       if (!user) return
       const path = collection(db, 'users', user.uid, name)
@@ -101,7 +104,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!user) return
       await setDoc(doc(db, 'users', user.uid, 'settings', 'main'), { ...next, updatedAt: serverTimestamp() }, { merge: true })
     },
-  }), [incomes, expenses, accounts, installments, paymentRecords, settings, pending, error, user])
+  }), [incomes, expenses, accounts, installments, paymentRecords, savingsGoals, settings, pending, error, user])
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>
 }
