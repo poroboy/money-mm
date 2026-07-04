@@ -34,4 +34,12 @@ describe('forecast engine', () => {
     expect(isInstallmentActiveInMonth(installments[0], '2027-05')).toBe(true)
     expect(isInstallmentActiveInMonth(installments[0], '2027-06')).toBe(false)
   })
+  it('ignores incomplete documents left by an older app version', () => {
+    const legacyIncome = { id: 'legacy', name: 'old', amount: undefined, isActive: true } as unknown as Income
+    const legacyExpense = { id: 'legacy', name: 'old', amount: 100, isActive: true } as unknown as Expense
+    const summary = getMonthlySummary({ month: '2026-07', incomes: [income, legacyIncome], expenses: [legacyExpense], accounts: [], installments: [] })
+    expect(summary.incomeTotal).toBe(35000)
+    expect(summary.expenseTotal).toBe(0)
+    expect(summary.netBalance).toBe(35000)
+  })
 })

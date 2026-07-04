@@ -2,8 +2,12 @@ import type { Account, Expense, Income, Installment, MonthlySummary } from './ty
 
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
 
+export function isValidMonth(value: unknown): value is string {
+  return typeof value === 'string' && MONTH_PATTERN.test(value)
+}
+
 function parseMonth(month: string) {
-  if (!MONTH_PATTERN.test(month)) throw new Error(`Invalid month: ${month}`)
+  if (!isValidMonth(month)) throw new Error(`Invalid month: ${month}`)
   const [year, monthNumber] = month.split('-').map(Number)
   return { year, monthNumber }
 }
@@ -26,15 +30,17 @@ export function diffMonths(startMonth: string, targetMonth: string): number {
 }
 
 export function isMonthInRange(targetMonth: string, startMonth: string, endMonth?: string | null): boolean {
+  if (!isValidMonth(targetMonth) || !isValidMonth(startMonth) || (endMonth && !isValidMonth(endMonth))) return false
   return diffMonths(startMonth, targetMonth) >= 0 && (!endMonth || diffMonths(targetMonth, endMonth) >= 0)
 }
 
 export function getForecastMonths(startMonth: string, count: number): string[] {
-  return Array.from({ length: Math.max(0, count) }, (_, index) => addMonths(startMonth, index))
+  if (!isValidMonth(startMonth) || !Number.isFinite(count)) return []
+  return Array.from({ length: Math.max(0, Math.floor(count)) }, (_, index) => addMonths(startMonth, index))
 }
 
 export function isIncomeActiveInMonth(income: Income, month: string): boolean {
-  if (!income.isActive) return false
+  if (!income.isActive || !isValidMonth(income.startMonth) || !isValidMonth(month)) return false
   const index = diffMonths(income.startMonth, month)
   if (income.type === 'once') return index === 0
   if (income.type === 'monthly') return index >= 0 && (!income.endMonth || month <= income.endMonth)
@@ -42,7 +48,7 @@ export function isIncomeActiveInMonth(income: Income, month: string): boolean {
 }
 
 export function isExpenseActiveInMonth(expense: Expense, month: string): boolean {
-  if (!expense.isActive) return false
+  if (!expense.isActive || !isValidMonth(expense.startMonth) || !isValidMonth(month)) return false
   const index = diffMonths(expense.startMonth, month)
   if (expense.type === 'once') return index === 0
   if (expense.type === 'forever') return index >= 0
@@ -50,7 +56,7 @@ export function isExpenseActiveInMonth(expense: Expense, month: string): boolean
 }
 
 export function isInstallmentActiveInMonth(installment: Installment, month: string): boolean {
-  if (installment.status !== 'active') return false
+  if (installment.status !== 'active' || !isValidMonth(installment.firstPaymentMonth) || !isValidMonth(month) || !Number.isFinite(installment.totalMonths)) return false
   const index = diffMonths(installment.firstPaymentMonth, month)
   return index >= 0 && index < installment.totalMonths
 }
@@ -58,14 +64,15 @@ export function isInstallmentActiveInMonth(installment: Installment, month: stri
 export function getMonthlySummary({ month, incomes, expenses, accounts, installments }: {
   month: string; incomes: Income[]; expenses: Expense[]; accounts: Account[]; installments: Installment[]
 }): MonthlySummary {
-  const incomeTotal = incomes.filter((item) => isIncomeActiveInMonth(item, month)).reduce((sum, item) => sum + item.amount, 0)
-  const expenseTotal = expenses.filter((item) => isExpenseActiveInMonth(item, month)).reduce((sum, item) => sum + item.amount, 0)
+  const amount = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : 0
+  const incomeTotal = incomes.filter((item) => isIncomeActiveInMonth(item, month)).reduce((sum, item) => sum + amount(item.amount), 0)
+  const expenseTotal = expenses.filter((item) => isExpenseActiveInMonth(item, month)).reduce((sum, item) => sum + amount(item.amount), 0)
   const activeInstallments = installments.filter((item) => isInstallmentActiveInMonth(item, month))
-  const installmentTotal = activeInstallments.reduce((sum, item) => sum + item.monthlyAmount, 0)
+  const installmentTotal = activeInstallments.reduce((sum, item) => sum + amount(item.monthlyAmount), 0)
   const accountSummaries = accounts.map((account) => ({
     accountId: account.id,
-    accountName: account.name,
-    total: activeInstallments.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.monthlyAmount, 0),
+    accountName: account.name || 'ไม่ทราบชื่อ',
+    total: activeInstallments.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + amount(item.monthlyAmount), 0),
   })).filter((item) => item.total > 0)
   return { month, incomeTotal, expenseTotal, installmentTotal, netBalance: incomeTotal - expenseTotal - installmentTotal, accountSummaries }
 }

@@ -53,11 +53,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     ]
     const settingsRef = doc(db, ...root, 'settings', 'main')
     getDoc(settingsRef).then(async (snapshot) => {
-      if (snapshot.exists()) setSettings(snapshot.data() as UserSettings)
+      if (snapshot.exists()) setSettings({ ...defaults, ...snapshot.data() } as UserSettings)
       else await setDoc(settingsRef, { ...defaults, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
       setPending((value) => Math.max(0, value - 1))
     }).catch((reason: Error) => { setError(reason.message); setPending(0) })
-    stops.push(onSnapshot(settingsRef, (snapshot) => { if (snapshot.exists()) setSettings(snapshot.data() as UserSettings) }))
+    stops.push(onSnapshot(settingsRef, (snapshot) => { if (snapshot.exists()) setSettings({ ...defaults, ...snapshot.data() } as UserSettings) }))
     return () => stops.forEach((stop) => stop())
   }, [user])
 
