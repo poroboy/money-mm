@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import type { Account, Expense, Income, Installment, PaymentItemType, PaymentRecord, SavingsGoal, UserSettings } from '../lib/types'
 import { useAuth } from './AuthContext'
@@ -21,6 +21,7 @@ type DataValue = {
   save: (name: CollectionName, payload: EntityPayload, id?: string) => Promise<void>
   remove: (name: CollectionName, id: string) => Promise<void>
   setPaymentStatus: (itemType: PaymentItemType, itemId: string, month: string, isPaid: boolean) => Promise<void>
+  setPaymentStatuses: (items: Array<{ itemType: PaymentItemType; itemId: string }>, month: string, isPaid: boolean) => Promise<void>
   saveSettings: (settings: Pick<UserSettings, 'currency' | 'forecastMonths' | 'monthStartDay'>) => Promise<void>
 }
 
@@ -99,6 +100,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }, { merge: true })
+    },
+    setPaymentStatuses: async (items, month, isPaid) => {
+      if (!user || !items.length) return
+      const batch = writeBatch(db)
+      items.forEach(({ itemType, itemId }) => {
+        const recordRef = doc(db, 'users', user.uid, 'paymentRecords', `${itemType}_${itemId}_${month}`)
+        if (!isPaid) {
+          batch.delete(recordRef)
+          return
+        }
+        batch.set(recordRef, {
+          itemType,
+          itemId,
+          month,
+          isPaid: true,
+          paidAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true })
+      })
+      await batch.commit()
     },
     saveSettings: async (next) => {
       if (!user) return

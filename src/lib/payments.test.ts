@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getPaidKeys, getPayablesForMonth } from './payments'
+import { getPaidKeys, getPayablesForMonth, groupPayables } from './payments'
 import type { Account, Expense, Installment, PaymentRecord } from './types'
 
 const expenses: Expense[] = [
@@ -19,5 +19,13 @@ describe('monthly payables', () => {
     const records = [{ id: 'x', itemType: 'expense', itemId: 'rent', month: '2026-07', isPaid: true }] as PaymentRecord[]
     expect(getPaidKeys(records, '2026-07').has('expense_rent')).toBe(true)
     expect(getPaidKeys(records, '2026-08').size).toBe(0)
+  })
+  it('groups expenses by category and installments by account', () => {
+    const items = getPayablesForMonth({ month: '2026-07', expenses, accounts, installments })
+    const groups = groupPayables(items)
+    expect(groups.map((group) => group.name)).toEqual(['บ้าน', 'Kbank'])
+    expect(groups[0].kind).toBe('expense')
+    expect(groups[1].kind).toBe('installment')
+    expect(groups[1].total).toBe(1500)
   })
 })

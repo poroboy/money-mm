@@ -1,10 +1,10 @@
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, ReceiptText, RotateCcw } from 'lucide-react'
+import { Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, FolderOpen, ReceiptText, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Card, EmptyState, PageTitle } from '../components/ui'
 import { useData } from '../context/DataContext'
 import { addMonths, getCurrentMonth } from '../lib/forecast'
 import { money, monthLabel } from '../lib/format'
-import { getPaidKeys, getPayablesForMonth } from '../lib/payments'
+import { getPaidKeys, getPayablesForMonth, groupPayables, type PayableItem } from '../lib/payments'
 
 type Filter = 'all' | 'unpaid' | 'paid'
 
@@ -20,11 +20,24 @@ export function PaymentsPage() {
   const paidTotal = paidItems.reduce((sum, item) => sum + item.amount, 0)
   const unpaidTotal = unpaidItems.reduce((sum, item) => sum + item.amount, 0)
   const visibleItems = filter === 'paid' ? paidItems : filter === 'unpaid' ? unpaidItems : payables
+  const groups = groupPayables(visibleItems)
 
   const toggle = async (item: (typeof payables)[number]) => {
     setBusyKey(item.key)
     try {
       await data.setPaymentStatus(item.itemType, item.itemId, month, !paidKeys.has(item.key))
+    } finally {
+      setBusyKey('')
+    }
+  }
+
+  const toggleGroup = async (groupKey: string, items: PayableItem[]) => {
+    const unpaid = items.filter((item) => !paidKeys.has(item.key))
+    const markPaid = unpaid.length > 0
+    const targets = markPaid ? unpaid : items
+    setBusyKey(`group_${groupKey}`)
+    try {
+      await data.setPaymentStatuses(targets.map(({ itemType, itemId }) => ({ itemType, itemId })), month, markPaid)
     } finally {
       setBusyKey('')
     }
@@ -55,7 +68,10 @@ export function PaymentsPage() {
         <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>ทั้งหมด ({payables.length})</FilterButton>
       </div>
 
-      {visibleItems.length ? <div className="grid gap-3">{visibleItems.map((item) => {
+      {visibleItems.length ? <div className="grid gap-5">{groups.map((group) => {
+        const unpaidInGroup = group.items.filter((item) => !paidKeys.has(item.key))
+        const markPaid = unpaidInGroup.length > 0
+        return <section key={group.key} className="overflow-hidden rounded-3xl border border-slate-100 bg-slate-50/60"><div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-10 shrink-0 place-items-center rounded-2xl ${group.kind === 'expense' ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}><FolderOpen size={19}/></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-bold text-slate-900">{group.name}</h3><span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500 shadow-sm">{group.kind === 'expense' ? 'หมวดรายจ่าย' : 'บัตร / ช่องทางผ่อน'}</span></div><p className="mt-1 text-xs text-slate-400">{group.items.length} รายการ · รวม {money(group.total)}</p></div></div><button disabled={busyKey === `group_${group.key}`} onClick={() => toggleGroup(group.key, group.items)} className={markPaid ? 'btn-primary whitespace-nowrap !py-2' : 'btn-secondary whitespace-nowrap !py-2'}>{markPaid ? <><CheckCheck size={17}/>{unpaidInGroup.length === group.items.length ? 'จ่ายทั้งกลุ่ม' : `จ่ายที่เหลือ (${unpaidInGroup.length})`}</> : <><RotateCcw size={16}/>เปลี่ยนทั้งกลุ่มเป็นยังไม่จ่าย</>}</button></div><div className="grid gap-2 p-3 sm:p-4">{group.items.map((item) => {
         const isPaid = paidKeys.has(item.key)
         return <div key={item.key} className={`flex flex-col gap-4 rounded-2xl border p-4 transition sm:flex-row sm:items-center sm:justify-between ${isPaid ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100 bg-white'}`}>
           <div className="flex min-w-0 items-start gap-3">
@@ -64,6 +80,7 @@ export function PaymentsPage() {
           </div>
           <div className="flex items-center justify-between gap-4 sm:justify-end"><strong className={isPaid ? 'text-slate-400 line-through' : 'text-slate-900'}>{money(item.amount)}</strong><button disabled={busyKey === item.key} onClick={() => toggle(item)} className={isPaid ? 'btn-secondary whitespace-nowrap !py-2' : 'btn-primary whitespace-nowrap !py-2'}>{isPaid ? <><RotateCcw size={16}/>เปลี่ยนเป็นยังไม่จ่าย</> : <><Check size={16}/>จ่ายแล้ว</>}</button></div>
         </div>
+      })}</div></section>
       })}</div> : <EmptyState title={filter === 'paid' ? 'ยังไม่มีรายการที่จ่ายแล้ว' : filter === 'unpaid' && payables.length ? 'จ่ายครบแล้ว เยี่ยมเลย!' : 'ไม่มีรายการที่ต้องจ่ายในเดือนนี้'} detail={filter === 'paid' ? 'เมื่อกดจ่ายแล้ว รายการจะมาอยู่ตรงนี้' : 'เลือกเดือนถัดไปเพื่อดูรายการที่กำลังจะมาถึง'}/>} 
     </Card>
   </>
