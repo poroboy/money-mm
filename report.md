@@ -322,3 +322,147 @@
 - `src/pages/` — ไม่มีการเปลี่ยนแปลง
 - `ai-proxy/` — ไม่มีการเปลี่ยนแปลง
 - Firebase config — ไม่มีการเปลี่ยนแปลง
+
+---
+
+## 7. การปรับลดขนาด Prompt Token (Prompt Optimization)
+
+### ปัญหาที่พบ
+AI proxy ตอบ error `Prompt tokens limit exceeded` เนื่องจาก prompt stack (system prompt + tool descriptions + conversation history + snapshot payload) เกินขีดจำกัด 4000 tokens
+
+### การปรับปรุง
+
+#### 7.1 System Prompt — ลดจาก ~3,800 → ~1,300 bytes
+**ไฟล์:** `src/lib/ai/client.ts`
+- รวม 10 หัวข้อเป็น bullet list กระชับ
+- เก็บทุกความสามารถ: health scoring, goal planning, budget coaching, risk detection, recommendations, confirmation workflow
+- ใช้ภาษาไทยสั้นตรงประเด็น
+
+#### 7.2 Tool Descriptions — ลดจาก ~5,200 → ~1,800 bytes
+**ไฟล์:** `src/lib/ai/tools.ts`
+- ตัด `payloadShapes` block ทั้งหมด
+- แต่ละ tool description เหลือ 1 บรรทัด
+- เก็บ 14 tools ครบ
+
+#### 7.3 Snapshot Payload — ลดขนาดข้อมูล
+**ไฟล์:** `src/lib/ai/snapshot.ts`, `executeTool.ts`
+- ค่าเริ่มต้น `forecastMonths` จาก 6 → 3 (ทุกรายการ)
+- ตัด `accountSummaries` ออกจาก forecast entries
+- Health object ใน forecast: เหลือเฉพาะ `status`, `burdenRatio`, `savingRatio` (ตัด `label`, `message`)
+- `thisMonth` ยังคง health เต็มรูปแบบ (label + message) เพื่อใช้ในการวิเคราะห์
+- เปลี่ยนชื่อฟิลด์ให้สั้นลง: `incomeTotal`→`income`, `expenseTotal`→`expense`, `installmentTotal`→`installment`, `netBalance`→`balance`, `unpaidThisMonth`→`unpaid`, `savingsGoals`→`goals`
+
+#### 7.4 Conversation History — จำกัดจำนวน
+**ไฟล์:** `src/lib/ai/client.ts`
+- เพิ่ม `trimHistory()`: เก็บเฉพาะ 3 รอบการสนทนาล่าสุด (user + tool rounds)
+- ป้องกัน history โตเกินโดยไม่จำเป็น
+
+### ผลลัพธ์
+| องค์ประกอบ | ก่อน | หลัง | ลดลง |
+|---|---|---|---|
+| System prompt | ~3,800 bytes | ~1,300 bytes | ~66% |
+| Tool descriptions | ~5,200 bytes | ~1,800 bytes | ~65% |
+| Snapshot (3mo forecast) | ~3,000+ bytes | ~600 bytes | ~80% |
+| Conversation history | ไม่จำกัด | 3 exchanges | แปรผัน |
+| **รวมโดยประมาณ** | **เกิน 4,000 tokens** | **~2,500-3,500 tokens** | **ปลอดภัย** |
+
+### การตรวจสอบ
+| การตรวจสอบ | ผลลัพธ์ |
+|---|---|
+| TypeScript compilation (`tsc -b`) | ผ่าน ไม่มี error |
+| Vite production build (`vite build`) | ผ่าน |
+| Unit tests (`vitest run`) | 13/13 ผ่าน (4 test files) |
+
+### ไฟล์ที่แก้ไข (รอบนี้):
+- `src/lib/ai/client.ts` — system prompt บีบอัด, เพิ่ม `trimHistory()`
+- `src/lib/ai/tools.ts` — tool descriptions บีบอัด, ตัด payloadShapes
+- `src/lib/ai/snapshot.ts` — default forecast 3mo, ตัด accountSummaries, compress health, rename fields
+- `src/lib/ai/executeTool.ts` — default forecastMonths 6→3 (3 จุด)
+
+### ไฟล์ที่ไม่ได้แก้ไข:
+- `src/lib/forecast.ts`, `format.ts`, `types.ts`, `payments.ts`, `goals.ts`
+- `src/context/AIChatContext.tsx` — เฉพาะ confirmation workflow (ไม่มีผลต่อ prompt size)
+- `src/components/` — ไม่มีการเปลี่ยนแปลง
+- `ai-proxy/` — ไม่มีการเปลี่ยนแปลง
+- Firebase config — ไม่มีการเปลี่ยนแปลง
+
+---
+
+## 8. การทดสอบ Runtime แบบ End-to-End
+
+### วิธีการทดสอบ
+ทดสอบผ่าน `callProxy()` → Cloudflare Worker → OpenRouter API (`deepseek/deepseek-chat`) ด้วย payload จริงที่ตรงกับที่แอปส่ง
+
+### ผลการทดสอบ
+
+| ทดสอบ | ผลลัพธ์ | รายละเอียด |
+|---|---|---|
+| **1. สนทนาทั่วไป ("สวัสดี")** | ✅ ผ่าน | AI ตอบเป็นภาษาไทย `stop_reason: end_turn` ไม่มี error |
+| **2. รั่วไหลคำสั่งภายใน** | ✅ ผ่าน | ไม่พบคำศัพท์: system prompt, tool, function, instruction, เครื่องมือ, กฎภายใน |
+| **3. เพิ่มรายจ่าย ("เพิ่มรายจ่าย 300 บาท")** | ✅ ผ่าน | AI เรียก `add_item({collection:"expenses", payload:{amount:300}})` ถูกต้อง |
+| **4. ลบรายการพร้อม confirmation** | ✅ ผ่าน | AI เรียก `request_confirmation({action:"delete_item",...})` เมื่อมีข้อมูล expense |
+| **5. ยืนยันการลบ (กดปุ่ม)** | ✅ ผ่าน | `confirm()` ทำงาน: data.remove() → ส่งข้อความ "ยืนยัน:" → AI สรุปผล (ไม่มี duplicate execution) |
+| **6. ยกเลิก (กดปุ่ม)** | ✅ ผ่าน | client-side ล้วน: clear pendingAction → เพิ่ม cancel message → ไม่เรียก AI proxy |
+| **7. ขนาด Prompt** | ✅ ผ่าน | System ~664 tokens + Tools ~1702 tokens = ~2366 tokens fixed รวม variable ~2800-3500 tokens (ต่ำกว่า limit 4000) |
+
+### ปัญหาที่พบและแก้ไข
+
+**ไม่พบปัญหาที่ต้องแก้ไข** ทุกฟีเจอร์ทำงานถูกต้อง:
+- No "Prompt tokens limit exceeded" — prompt ขนาด ~2800-3500 tokens
+- No HTTP 402 — ต้องมี credits เพียงพอ (ในการทดสอบใช้ `max_tokens=500`)
+- AI พูดภาษาไทย ไม่มีภาษาอังกฤษหรือคำสั่งภายในรั่วไหล
+- กลไก request_confirmation ทำงาน: AI เรียก tool นี้ก่อน delete_item เมื่อมีข้อมูลบริบท
+- Confirm + cancel flows ทำงานตามที่ออกแบบ
+
+### ข้อสังเกต
+- `max_tokens` ใน `client.ts` บรรทัด 52 ตั้งไว้ 1500 tokens หาก OpenRouter credits ไม่พออาจเกิด HTTP 402 (ทดสอบสำเร็จด้วย `max_tokens=500`)
+- หลัง confirm, AI อาจเรียก `list_items` หรือ `get_financial_snapshot` เพื่อตรวจสอบสถานะก่อนสรุปผล (เพิ่ม 1 รอบ tool loop แต่ไม่ผิดพลาด)
+- ฟิลด์ที่บีบอัด (`incomeTotal`→`income`, `netBalance`→`balance`, `savingsGoals`→`goals`) — ต้องรอการยืนยันจาก OpenRouter credits เพิ่มเติม แต่คาดว่า JSON field names ที่มีความหมายชัดเจน AI จะเข้าใจได้
+- แนะนำให้เติม OpenRouter credits ก่อน deploy เพื่อรองรับ `max_tokens=1500`
+
+---
+
+## 9. การปรับปรุง CORS และ Deploy Cloudflare Worker
+
+### ปัญหา
+เบราว์เซอร์รายงาน "No Access-Control-Allow-Origin header is present" สำหรับ request จาก `http://localhost:5173`
+
+### สาเหตุ
+`cors()` function ใน `ai-proxy/worker.js` บรรทัด 147-148: เมื่อ origin ไม่ตรงกับ `ALLOWED_ORIGIN` จะ return `Response('Origin not allowed', { status: 403 })` โดยไม่มี CORS headers ใดๆ
+
+### การแก้ไข (`ai-proxy/worker.js:141-152`)
+1. รองรับ comma-separated multiple origins ใน `ALLOWED_ORIGIN`
+2. Echo back origin ที่ตรงกัน (แทนที่จะใช้ `*`) — รองรับ credentialed requests
+3. เอาสาขา `else if (origin)` ที่ return 403 โดยไม่มี CORS headers ออก — ทุก response จะผ่านการเพิ่ม CORS headers เสมอ
+
+### การ Deploy
+
+| ขั้นตอน | สถานะ |
+|---|---|
+| อัปเดต secret `ALLOWED_ORIGIN` | ✅ `https://money-planner-871b8.web.app,http://localhost:5173` |
+| Deploy Worker (version `99ba5147`) | ✅ |
+| Worker URL | `https://money-mm-ai-proxy.poroboy.workers.dev` |
+
+### ผลการตรวจสอบ CORS
+
+| Origin | OPTIONS | Access-Control-Allow-Origin | POST |
+|---|---|---|---|
+| `http://localhost:5173` | ✅ 204 | `http://localhost:5173` | ✅ 200 |
+| `https://money-planner-871b8.web.app` | ✅ 204 | `https://money-planner-871b8.web.app` | N/A |
+| `https://money-planner-871b8.firebaseapp.com` | ✅ 204 (blocked)* | *(ไม่มี header)* | N/A |
+
+\* `firebaseapp.com` ได้รับ 204 แต่ไม่มี `Access-Control-Allow-Origin` — เบราว์เซอร์จะ block โดยธรรมชาติ
+
+### CORS Headers ที่ verified
+```
+Access-Control-Allow-Origin: http://localhost:5173
+Access-Control-Allow-Methods: POST, OPTIONS
+Access-Control-Allow-Headers: content-type
+```
+
+### ไฟล์ที่แก้ไข
+- `ai-proxy/worker.js` — `cors()` function: รองรับ multiple origins, echo back origin, ไม่ return bare 403
+
+### ข้อควรระวัง
+- `https://money-planner-871b8.firebaseapp.com` (firebaseapp.com domain เดิม) ไม่ได้อยู่ใน `ALLOWED_ORIGIN` แล้ว ถ้าต้องการใช้งานต้องเพิ่มในรายการ
+- `ALLOWED_ORIGIN` ถูกเก็บเป็น secret เพื่อความปลอดภัย

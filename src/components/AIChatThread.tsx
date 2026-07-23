@@ -1,17 +1,13 @@
 import { Check, Copy, LoaderCircle, Send, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Highlight, themes } from 'prism-react-renderer'
 import { useAIChat, textOf } from '../context/AIChatContext'
+import { useData } from '../context/DataContext'
 import { isConfigured } from '../lib/ai/client'
 import { getSuggestedActions, type SuggestedAction } from '../lib/ai/actions'
+import { getSmartSuggestions } from '../lib/ai/suggestions'
 
-const SUGGESTIONS = [
-  'เดือนนี้สถานะการเงินเป็นยังไงบ้าง',
-  'วิเคราะห์แนวโน้มรายจ่ายให้หน่อย',
-  'อีกกี่เดือนถึงจะถึงเป้าหมายออมเงิน',
-  'จ่ายค่าไฟ 800 บาทแล้ว',
-]
 const MAX_TEXTAREA_HEIGHT = 160
 
 function stripMarkdown(text: string): string {
@@ -201,11 +197,13 @@ function ConfirmationButtons({ onConfirm, onCancel, sending }: { onConfirm: () =
 
 export function AIChatThread({ compact = false }: { compact?: boolean }) {
   const { messages, sending, error, send, retry, loadingThread, pendingAction, confirm, cancel } = useAIChat()
+  const data = useData()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
+  const smartSuggestions = useMemo(() => getSmartSuggestions(data), [data])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -267,13 +265,13 @@ export function AIChatThread({ compact = false }: { compact?: boolean }) {
               ลองถามได้เลย เช่น
             </div>
             <div className="mt-4 grid gap-2.5">
-              {SUGGESTIONS.map((suggestion) => (
+              {smartSuggestions.map((s) => (
                 <button
-                  key={suggestion}
-                  onClick={() => void send(suggestion)}
+                  key={s.prompt}
+                  onClick={() => void send(s.prompt)}
                   className="rounded-2xl bg-white px-4 py-3 text-left text-sm text-slate-600 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-300"
                 >
-                  {suggestion}
+                  {s.label}
                 </button>
               ))}
             </div>
@@ -315,15 +313,18 @@ export function AIChatThread({ compact = false }: { compact?: boolean }) {
         {sending && <TypingDots />}
 
         {error && (
-          <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-600" role="alert">
-            <p>{error}</p>
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3.5 text-sm leading-relaxed text-red-700 shadow-sm" role="alert">
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-red-200 text-[11px] font-bold text-red-700">!</span>
+              <p>{error}</p>
+            </div>
             <button
               onClick={retry}
               disabled={sending}
               aria-label="ลองอีกครั้ง"
-              className="mt-2.5 rounded-xl bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-300"
+              className="mt-3 rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              ลองอีกครั้ง
+              {sending ? 'กำลังส่ง...' : 'ลองอีกครั้ง'}
             </button>
           </div>
         )}
@@ -342,17 +343,18 @@ export function AIChatThread({ compact = false }: { compact?: boolean }) {
               submit()
             }
           }}
-          placeholder="พิมพ์คำถามหรือรายการที่ต้องการบันทึก…"
+          placeholder={sending ? 'กำลังรอคำตอบ...' : 'พิมพ์คำถามหรือรายการที่ต้องการบันทึก…'}
+          disabled={sending}
           rows={1}
-          className="max-h-40 min-h-[52px] flex-1 resize-none rounded-[20px] border border-transparent bg-transparent px-4 py-3 text-[15px] leading-6 outline-none placeholder:text-slate-400 focus:border-slate-200"
+          className="max-h-40 min-h-[52px] flex-1 resize-none rounded-[20px] border border-transparent bg-transparent px-4 py-3 text-[15px] leading-6 outline-none placeholder:text-slate-400 focus:border-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <button
           onClick={submit}
           disabled={sending || !input.trim()}
           aria-label="ส่งข้อความ"
-          className="grid size-11 shrink-0 place-items-center self-center rounded-2xl bg-[#173f2b] text-white transition hover:bg-[#22563c] focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-40"
+          className="grid size-11 shrink-0 place-items-center self-center rounded-2xl bg-[#173f2b] text-white transition hover:bg-[#22563c] focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <Send size={17} />
+          {sending ? <LoaderCircle size={17} className="animate-spin" /> : <Send size={17} />}
         </button>
       </div>
     </div>

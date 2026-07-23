@@ -8,7 +8,7 @@ type CollectionName = 'incomes' | 'expenses' | 'accounts' | 'installments' | 'sa
 type AnyEntity = Income | Expense | Account | Installment | SavingsGoal
 type EntityPayload = Omit<AnyEntity, 'id' | 'createdAt' | 'updatedAt'>
 
-type DataValue = {
+export type DataValue = {
   incomes: Income[]
   expenses: Expense[]
   accounts: Account[]

@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, orderBy, query, limit, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { sendChatMessage, textOf, type ChatMessage, type PendingAction } from '../lib/ai/client'
+import { buildFinancialContext } from '../lib/ai/context'
 import { db } from '../lib/firebase'
 import { useAuth } from './AuthContext'
 import { useData } from './DataContext'
@@ -9,9 +10,9 @@ type AIChatValue = {
   messages: ChatMessage[]
   sending: boolean
   error: string
-  send: (text: string) => Promise<void>
+  send: (text: string, externalContext?: string) => Promise<void>
   retry: () => void
-  newChat: () => void
+  clearConversation: () => void
   loadingThread: boolean
   widgetOpen: boolean
   setWidgetOpen: (value: boolean) => void
@@ -26,9 +27,13 @@ function mapError(error: unknown): string {
   const message = (error as Error)?.message || ''
   if (message.includes('VITE_AI_PROXY_URL')) return 'การตั้งค่า AI ยังไม่สมบูรณ์'
   if (message.includes('429') || message.includes('Too Many Requests') || message.includes('rate limit')) return 'ระบบ AI กำลังมีผู้ใช้หนาแน่น กรุณาลองใหม่ในอีกสักครู่'
-  if (message.includes('Failed to fetch') || message.includes('NetworkError') || message.includes('Network request failed') || message.includes('fetch')) return 'ไม่สามารถเชื่อมต่อกับระบบ AI ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'
+  if (message.includes('Failed to fetch') || message.includes('NetworkError') || message.includes('Network request failed') || message.includes('fetch') || message.includes('ENOTFOUND') || message.includes('ECONNREFUSED')) return 'ไม่สามารถเชื่อมต่อกับระบบ AI ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'
   if (message.includes('401') || message.includes('Unauthorized') || message.includes('403') || message.includes('Forbidden')) return 'การยืนยันตัวตนกับระบบ AI ล้มเหลว กรุณาตรวจสอบการตั้งค่า'
   if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('Internal Server Error') || message.includes('Bad Gateway') || message.includes('Service Unavailable')) return 'เซิร์ฟเวอร์ AI มีปัญหา กรุณาลองใหม่ในภายหลัง'
+  if (message.includes('408') || message.includes('504') || message.includes('Timeout') || message.includes('timeout') || message.includes('AbortError')) return 'ระบบ AI ไม่ตอบสนอง กรุณาลองใหม่อีกครั้ง'
+  if (message.includes('400') || message.includes('Bad Request')) return 'คำขอไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง'
+  if (message.includes('413') || message.includes('Payload Too Large')) return 'ข้อความยาวเกินไป กรุณาตัดข้อความให้สั้นลง'
+  if (message.includes('Both models failed')) return 'ระบบ AI ไม่พร้อมให้บริการ กรุณาลองใหม่ในภายหลัง'
   return 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
 }
 
@@ -92,30 +97,28 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     }
   }, [user])
 
-  const send = useCallback(async (text: string) => {
+  const getContext = useCallback(() => buildFinancialContext(data), [data])
+
+  const send = useCallback(async (text: string, externalContext?: string) => {
     if (!text.trim() || sending) return
     setLastUserText(text)
     setSending(true)
     setError('')
     setPendingAction(null)
     try {
+      const context = externalContext ?? getContext()
       const next = await sendChatMessage(messages, text, data, {
         onPending: (action) => setPendingAction(action),
+        context,
       })
       setMessages(next)
       await persist(next, text)
     } catch (reason) {
-      const message = (reason as Error)?.message || ''
-      if (message.includes('fetch') || message.includes('Network') || message.includes('Failed to fetch')) {
-        setError('ไม่สามารถเชื่อมต่อกับระบบ AI ได้ — กำลังลองอีกครั้ง...')
-        setTimeout(() => { if (text) void send(text) }, 3000)
-        return
-      }
       setError(mapError(reason))
     } finally {
       setSending(false)
     }
-  }, [messages, sending, data, persist])
+  }, [messages, sending, data, persist, getContext])
 
   const confirm = useCallback(async () => {
     if (!pendingAction) return
@@ -124,6 +127,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     setSending(true)
     setError('')
     try {
+      const context = getContext()
       const collection = action.args.collection as 'incomes' | 'expenses' | 'accounts' | 'installments' | 'savingsGoals'
       const id = action.args.id as string
       if (action.tool === 'delete_item' && collection && id) {
@@ -142,7 +146,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         const payload = action.args.payload as Record<string, unknown>
         await data.save(collection, payload as never, id)
       } else {
-        const result = await sendChatMessage(messages, `ดำเนินการ ${action.tool} ตามที่ตกลงแล้ว`, data)
+        const result = await sendChatMessage(messages, `ดำเนินการ ${action.tool} ตามที่ตกลงแล้ว`, data, { context })
         setMessages(result)
         await persist(result, `ดำเนินการ ${action.tool}`)
         setSending(false)
@@ -150,7 +154,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
       }
       const confirmMsg: ChatMessage = { role: 'user', content: [{ type: 'text', text: `ยืนยัน: ${action.summary || `ดำเนินการ ${action.tool}`}` }] }
       const updatedMessages = [...messages, confirmMsg]
-      const result = await sendChatMessage(updatedMessages, '', data)
+      const result = await sendChatMessage(updatedMessages, '', data, { context })
       setMessages(result)
       await persist(result, 'ยืนยัน')
     } catch (reason) {
@@ -158,7 +162,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     } finally {
       setSending(false)
     }
-  }, [pendingAction, messages, data, persist])
+  }, [pendingAction, messages, data, persist, getContext])
 
   const cancel = useCallback(() => {
     if (!pendingAction) return
@@ -173,7 +177,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     if (lastUserText) void send(lastUserText)
   }, [lastUserText, send])
 
-  const newChat = useCallback(() => {
+  const clearConversation = useCallback(() => {
     setMessages([])
     setError('')
     setPendingAction(null)
@@ -182,8 +186,8 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<AIChatValue>(() => ({
-    messages, sending, error, send, retry, newChat, loadingThread, widgetOpen, setWidgetOpen, pendingAction, confirm, cancel,
-  }), [messages, sending, error, send, retry, newChat, loadingThread, widgetOpen, pendingAction, confirm, cancel])
+    messages, sending, error, send, retry, clearConversation, loadingThread, widgetOpen, setWidgetOpen, pendingAction, confirm, cancel,
+  }), [messages, sending, error, send, retry, clearConversation, loadingThread, widgetOpen, setWidgetOpen, pendingAction, confirm, cancel])
 
   return <AIChatContext.Provider value={value}>{children}</AIChatContext.Provider>
 }

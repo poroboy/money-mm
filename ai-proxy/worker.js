@@ -1,153 +1,173 @@
-const DEFAULT_MODEL = 'deepseek/deepseek-chat'
+const DEFAULT_PRIMARY = 'gemini-3.6-flash'
+const DEFAULT_FALLBACK = 'gemini-3.1-flash-lite'
 
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') return cors(request, new Response(null, { status: 204 }), env)
-    if (request.method !== 'POST') return cors(request, new Response('Method not allowed', { status: 405 }), env)
+    const startTime = Date.now()
+    if (request.method === 'OPTIONS') return cors(request, new Response(null, { status: 204 }), env, startTime)
+    if (request.method !== 'POST') return cors(request, new Response('Method not allowed', { status: 405 }), env, startTime)
 
-    const apiKey = env.OPENROUTER_API_KEY
+    const provider = env.AI_PROVIDER || 'google'
+    if (provider !== 'google') {
+      return cors(request, new Response(`Unsupported provider: ${provider} (only "google" is supported)`, { status: 400 }), env, startTime)
+    }
+
+    const apiKey = env.GOOGLE_API_KEY
     if (!apiKey) {
-      return cors(request, new Response('Proxy is missing OPENROUTER_API_KEY', { status: 500 }), env)
+      return cors(request, new Response('Missing GOOGLE_API_KEY', { status: 500 }), env, startTime)
     }
 
     let body
     try {
       body = await request.json()
     } catch {
-      return cors(request, new Response('Invalid JSON body', { status: 400 }), env)
+      return cors(request, new Response('Invalid JSON body', { status: 400 }), env, startTime)
     }
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
-      return cors(request, new Response('Missing or invalid "messages" in request body', { status: 400 }), env)
-    }
-
-    if (body.model !== undefined && typeof body.model !== 'string') {
-      return cors(request, new Response('Invalid "model" — must be a string', { status: 400 }), env)
+      return cors(request, new Response('Missing or invalid "messages" in request body', { status: 400 }), env, startTime)
     }
 
     if (body.tools !== undefined && !Array.isArray(body.tools)) {
-      return cors(request, new Response('Invalid "tools" — must be an array', { status: 400 }), env)
+      return cors(request, new Response('Invalid "tools" — must be an array', { status: 400 }), env, startTime)
     }
 
-    const model = body.model || env.OPENROUTER_MODEL || DEFAULT_MODEL
-    const tools = (body.tools ?? []).filter(isValidTool).map(normalizeTool)
+    const primaryModel = env.PRIMARY_MODEL || DEFAULT_PRIMARY
+    const fallbackModel = env.FALLBACK_MODEL || DEFAULT_FALLBACK
+    const validTools = (body.tools ?? []).filter(isValidTool).map(convertTool)
 
-    const upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: Math.min(body.max_tokens ?? 1500, 4096),
-        messages: toOpenRouterMessages(body.system, body.messages),
-        ...(tools.length ? { tools } : {}),
-      }),
-    })
+    const { contents, systemInstruction } = toGeminiContents(body.system, body.messages)
 
-    if (!upstream.ok) {
-      const text = await upstream.text()
-      return cors(request, new Response(text, { status: upstream.status, headers: { 'content-type': 'application/json' } }), env)
+    let usedModel = primaryModel
+    let usedFallback = false
+    let response
+
+    const primarySignal = AbortSignal.timeout(30000)
+    try {
+      response = await callGemini(primaryModel, contents, systemInstruction, validTools, body.max_tokens, apiKey, primarySignal)
+      if (!response.ok) {
+        const status = response.status
+        if (status === 400 || status === 401 || status === 403) {
+          const text = await response.text()
+          return cors(request, new Response(text, { status }), env, startTime)
+        }
+        throw new Error(`Primary model ${primaryModel} failed with status ${status}`)
+      }
+    } catch (e) {
+      if (e.name === 'AbortError' || e.message?.includes('failed')) {
+        usedModel = fallbackModel
+        usedFallback = true
+        const fbSignal = AbortSignal.timeout(30000)
+        try {
+          response = await callGemini(fallbackModel, contents, systemInstruction, validTools, body.max_tokens, apiKey, fbSignal)
+          if (!response.ok) {
+            const text = await response.text()
+            return cors(request, new Response(text, { status: response.status }), env, startTime)
+          }
+        } catch (e2) {
+          const msg = e2.name === 'AbortError' ? 'timeout' : e2.message
+          return cors(request, new Response(`Both models failed (fallback ${msg})`, { status: 500 }), env, startTime)
+        }
+      } else {
+        return cors(request, new Response(e.message, { status: 500 }), env, startTime)
+      }
     }
 
-    const response = await upstream.json()
-    return cors(request, Response.json(toAnthropicResponse(response)), env)
+    const data = await response.json()
+    const anthropicResponse = toAnthropicResponse(data)
+    const result = Response.json(anthropicResponse)
+    result.headers.set('X-AI-Provider', 'google')
+    result.headers.set('X-Model-Used', usedModel)
+    if (usedFallback) result.headers.set('X-Fallback', 'true')
+    return cors(request, result, env, startTime)
   },
 }
 
+async function callGemini(model, contents, systemInstruction, tools, maxTokens, apiKey, signal) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const body = { contents }
+  if (systemInstruction) body.systemInstruction = systemInstruction
+  if (tools.length) body.tools = [{ functionDeclarations: tools }]
+  body.generationConfig = { maxOutputTokens: Math.min(maxTokens ?? 1500, 8192) }
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal })
+}
+
 function isValidTool(tool) {
-  return tool
-    && typeof tool.name === 'string'
-    && tool.name.length > 0
-    && typeof tool.description === 'string'
+  return tool && typeof tool.name === 'string' && tool.name.length > 0 && typeof tool.description === 'string'
 }
 
-function toOpenRouterMessages(system, messages) {
-  const output = system ? [{ role: 'system', content: system }] : []
-  for (const message of messages) {
-    if (message.role === 'assistant') {
-      const text = message.content
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('\n')
-      const tool_calls = message.content
-        .filter((item) => item.type === 'tool_use')
-        .map((item) => ({
-          id: item.id,
-          type: 'function',
-          function: { name: item.name, arguments: JSON.stringify(item.input) },
-        }))
-      output.push({
-        role: 'assistant',
-        content: text || null,
-        ...(tool_calls.length ? { tool_calls } : {}),
-      })
-      continue
-    }
+function convertTool(tool) {
+  return { name: tool.name, description: tool.description, parameters: tool.input_schema || { type: 'object', properties: {} } }
+}
 
-    const results = message.content.filter((item) => item.type === 'tool_result')
-    if (results.length) {
-      output.push(
-        ...results.map((item) => ({
-          role: 'tool',
-          tool_call_id: item.tool_use_id,
-          content: item.content,
-        })),
-      )
+function toGeminiContents(system, messages) {
+  const callIdToName = {}
+  const contents = []
+  for (const msg of messages) {
+    if (msg.role === 'assistant') {
+      const parts = []
+      for (const block of msg.content || []) {
+        if (block.type === 'text') {
+          parts.push({ text: block.text })
+        } else if (block.type === 'tool_use') {
+          callIdToName[block.id] = block.name
+          const part = { functionCall: { name: block.name, args: block.input || {} } }
+          const sig = block.thought_signature || 'skip_thought_signature_validator'
+          part.thought_signature = sig
+          parts.push(part)
+        }
+      }
+      contents.push({ role: 'model', parts })
     } else {
-      const text = message.content
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('\n')
-      output.push({ role: 'user', content: text })
+      const parts = []
+      for (const block of msg.content || []) {
+        if (block.type === 'text') {
+          parts.push({ text: block.text })
+        } else if (block.type === 'tool_result') {
+          const funcName = callIdToName[block.tool_use_id] || 'unknown'
+          let responseObj = {}
+          try { responseObj = JSON.parse(block.content) } catch { responseObj = { raw: block.content } }
+          parts.push({ functionResponse: { name: funcName, response: responseObj } })
+        }
+      }
+      if (parts.length) contents.push({ role: 'user', parts })
     }
   }
-  return output
+  return { contents, systemInstruction: system ? { parts: [{ text: system }] } : undefined }
 }
 
-function normalizeTool(tool) {
-  return {
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.input_schema || { type: 'object', properties: {} },
-    },
+function toAnthropicResponse(geminiResponse) {
+  const candidate = geminiResponse.candidates?.[0]
+  if (!candidate) {
+    const reason = geminiResponse.promptFeedback?.blockReason
+    return { content: [{ type: 'text', text: reason ? `Request blocked: ${reason}` : 'Empty response from model' }], stop_reason: 'end_turn' }
   }
-}
-
-function toAnthropicResponse(response) {
-  const message = response.choices?.[0]?.message ?? {}
+  const parts = candidate.content?.parts || []
   const content = []
-  if (message.content) {
-    content.push({ type: 'text', text: message.content })
-  }
-  for (const call of message.tool_calls ?? []) {
-    let input = {}
-    try {
-      input = JSON.parse(call.function.arguments || '{}')
-    } catch {
-      input = {}
+  let hasToolUse = false
+  for (const part of parts) {
+    if (part.text) {
+      content.push({ type: 'text', text: part.text })
+    } else if (part.functionCall) {
+      hasToolUse = true
+      const fc = { type: 'tool_use', id: `toolcall_${content.length}`, name: part.functionCall.name, input: part.functionCall.args || {} }
+      if (part.thought_signature) fc.thought_signature = part.thought_signature
+      content.push(fc)
     }
-    content.push({ type: 'tool_use', id: call.id, name: call.function.name, input })
   }
-  return {
-    content,
-    stop_reason: message.tool_calls?.length ? 'tool_use' : 'end_turn',
-  }
+  return { content, stop_reason: hasToolUse ? 'tool_use' : 'end_turn' }
 }
 
-function cors(request, response, env) {
+function cors(request, response, env, startTime) {
   const origin = request.headers.get('Origin') || ''
   const allowedOrigin = env.ALLOWED_ORIGIN || '*'
+  const allowedOrigins = allowedOrigin === '*' ? ['*'] : allowedOrigin.split(',').map((s) => s.trim())
   const headers = new Headers(response.headers)
-  if (allowedOrigin === '*' || origin === allowedOrigin) {
-    headers.set('Access-Control-Allow-Origin', allowedOrigin)
-  } else if (origin) {
-    return new Response('Origin not allowed', { status: 403 })
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    headers.set('Access-Control-Allow-Origin', allowedOrigin === '*' ? '*' : origin)
   }
   headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
   headers.set('Access-Control-Allow-Headers', 'content-type')
+  if (startTime) headers.set('X-Response-Time', `${Date.now() - startTime}ms`)
   return new Response(response.body, { status: response.status, headers })
 }

@@ -20,7 +20,7 @@ export type SimulatedChange = {
 
 export function buildFinancialSnapshot(input: SnapshotInput) {
   const month = getCurrentMonth()
-  const months = Math.min(Math.max(input.forecastMonths ?? 6, 1), 24)
+  const months = Math.min(Math.max(input.forecastMonths ?? 3, 1), 24)
   const forecast = getForecast({
     startMonth: month,
     months,
@@ -40,21 +40,17 @@ export function buildFinancialSnapshot(input: SnapshotInput) {
     .filter((item) => isInstallmentActiveInMonth(item, month) && !paidKeys.has(`installment_${item.id}`))
     .map((item) => ({ id: item.id, name: item.name, amount: item.monthlyAmount, paymentDay: item.paymentDay ?? null }))
 
+  const compressHealth = (summary: ReturnType<typeof getForecast>[number]) => {
+    const h = getFinancialHealth(summary)
+    return { status: h.status, burdenRatio: h.burdenRatio, savingRatio: h.savingRatio }
+  }
+
   return {
     currentMonth: month,
-    thisMonth: { ...forecast[0], health: getFinancialHealth(forecast[0]) },
-    forecast: forecast.map((summary) => ({ ...summary, health: getFinancialHealth(summary) })),
-    unpaidThisMonth: { expenses: unpaidExpenses, installments: unpaidInstallments },
-    savingsGoals: input.savingsGoals.map((goal) => ({
-      id: goal.id,
-      name: goal.name,
-      targetAmount: goal.targetAmount,
-      savedAmount: goal.savedAmount,
-      remaining: Math.max(0, goal.targetAmount - goal.savedAmount),
-      targetMonth: goal.targetMonth,
-      priority: goal.priority,
-      status: goal.status,
-    })),
+    thisMonth: { month: forecast[0].month, income: forecast[0].incomeTotal, expense: forecast[0].expenseTotal, installment: forecast[0].installmentTotal, balance: forecast[0].netBalance, health: getFinancialHealth(forecast[0]) },
+    forecast: forecast.map((s) => ({ month: s.month, income: s.incomeTotal, expense: s.expenseTotal, installment: s.installmentTotal, balance: s.netBalance, health: compressHealth(s) })),
+    unpaid: { expenses: unpaidExpenses, installments: unpaidInstallments },
+    goals: input.savingsGoals.map((g) => ({ n: g.name, target: g.targetAmount, saved: g.savedAmount, remain: Math.max(0, g.targetAmount - g.savedAmount), by: g.targetMonth, pri: g.priority, st: g.status })),
   }
 }
 
@@ -135,7 +131,7 @@ export type TrendAnalysis = {
 
 export function analyzeTrends(input: SnapshotInput): TrendAnalysis {
   const month = getCurrentMonth()
-  const months = Math.min(Math.max(input.forecastMonths ?? 6, 1), 24)
+  const months = Math.min(Math.max(input.forecastMonths ?? 3, 1), 24)
   const forecast = getForecast({
     startMonth: month,
     months,

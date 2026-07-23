@@ -62,7 +62,7 @@ export async function executeTool(name: string, input: Record<string, unknown>, 
         installments: data.installments,
         paymentRecords: data.paymentRecords,
         savingsGoals: data.savingsGoals,
-        forecastMonths: (input.forecastMonths as number) ?? 6,
+        forecastMonths: (input.forecastMonths as number) ?? 3,
       })
 
     case 'financial_health_score':
@@ -127,7 +127,7 @@ export async function executeTool(name: string, input: Record<string, unknown>, 
           installments: data.installments,
           paymentRecords: data.paymentRecords,
           savingsGoals: data.savingsGoals,
-          forecastMonths: (input.forecastMonths as number) ?? 6,
+          forecastMonths: (input.forecastMonths as number) ?? 3,
         },
         input.changes as SimulatedChange[],
       )

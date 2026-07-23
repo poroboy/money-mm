@@ -1,6 +1,6 @@
 # AI proxy — Cloudflare Worker
 
-This proxy keeps the OpenRouter API key off the Firebase web app.
+This proxy keeps the Google Gemini API key off the Firebase web app.
 The client never sees the key — only this Worker has access to it.
 
 ## Deploy
@@ -9,19 +9,42 @@ The client never sees the key — only this Worker has access to it.
 cd ai-proxy
 npm install -g wrangler
 wrangler login
-wrangler secret put OPENROUTER_API_KEY
+wrangler secret put GOOGLE_API_KEY
+wrangler secret put ALLOWED_ORIGIN
 wrangler deploy
 ```
 
-Create a free API key at https://openrouter.ai/keys.
+Create a free API key at https://aistudio.google.com/apikey.
 
 ## Environment variables
 
-| Secret / Variable | Required | Description |
+### Secrets (set via `wrangler secret put`)
+
+| Secret | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Yes | OpenRouter API key (set via `wrangler secret put`) |
-| `OPENROUTER_MODEL` | No | Model override (default: `deepseek/deepseek-chat`) |
-| `ALLOWED_ORIGIN` | No | CORS origin restriction (default: `*`, set to your Firebase Hosting URL in production) |
+| `GOOGLE_API_KEY` | Yes | Google AI Studio API key |
+| `ALLOWED_ORIGIN` | No | CORS origin restriction (default: `*`, comma-separated for multiple origins) |
+
+### Variables (set via `wrangler secret put` or `wrangler.toml` `[vars]`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `AI_PROVIDER` | No | `google` | Provider (only `google` is supported) |
+| `PRIMARY_MODEL` | No | `gemini-2.0-flash` | Primary Gemini model |
+| `FALLBACK_MODEL` | No | `gemini-1.5-flash` | Fallback model if primary fails/times out |
+
+### Fallback behavior
+
+The worker retries with the fallback model when the primary model:
+- times out (30s)
+- returns HTTP 429 (rate limited)
+- returns HTTP 500/502/503/504 (server error)
+- is unavailable
+
+No fallback for:
+- HTTP 400 (bad request)
+- HTTP 401 (unauthorized)
+- HTTP 403 (forbidden)
 
 ## Client setup
 
@@ -31,19 +54,16 @@ After deployment, set this in the root `.env.local`:
 VITE_AI_PROXY_URL=https://money-mm-ai-proxy.<your-subdomain>.workers.dev
 ```
 
-Optionally set a specific model:
+The proxy handles model selection server-side via `PRIMARY_MODEL` / `FALLBACK_MODEL`.
+No client-side model config is needed.
+
+## Model logging
+
+Each response includes an `X-Model-Used` header indicating which model handled the request:
 
 ```
-VITE_AI_MODEL=qwen/qwen3-coder:free
+X-Model-Used: gemini-2.0-flash
 ```
-
-## Recommended models
-
-1. `deepseek/deepseek-chat` — DeepSeek V3 (default, tool calling)
-2. `google/gemma-4-31b-it:free` — Gemma 4 31B (free, multilingual, tool calling)
-3. `nvidia/nemotron-3-ultra-550b-a55b:free` — Nemotron 3 Ultra 550B (free, 1M context, tool calling)
-4. `openai/gpt-oss-20b:free` — GPT-OSS 20B (free, function calling)
-5. `poolside/laguna-m.1:free` — Laguna M.1 (free, agentic, tool calling)
 
 ## CORS
 
@@ -53,4 +73,8 @@ By default CORS allows all origins (`*`). To restrict:
 wrangler secret put ALLOWED_ORIGIN
 ```
 
-Enter `https://money-planner-871b8.web.app` (or your actual Firebase Hosting URL).
+Enter a comma-separated list of allowed origins, e.g.:
+
+```
+https://money-planner-871b8.web.app,http://localhost:5173
+```
