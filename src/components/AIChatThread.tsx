@@ -1,4 +1,4 @@
-import { Check, Copy, LoaderCircle, Send, Sparkles } from 'lucide-react'
+import { Check, Copy, LoaderCircle, Send, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Highlight, themes } from 'prism-react-renderer'
@@ -176,8 +176,31 @@ function MarkdownMessage({ content }: { content: string }) {
   )
 }
 
+function ConfirmationButtons({ onConfirm, onCancel, sending }: { onConfirm: () => void; onCancel: () => void; sending: boolean }) {
+  return (
+    <div className="flex gap-3" role="group" aria-label="ยืนยันการดำเนินการ">
+      <button
+        onClick={onConfirm}
+        disabled={sending}
+        className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:opacity-50"
+      >
+        <ThumbsUp size={15} />
+        ยืนยัน
+      </button>
+      <button
+        onClick={onCancel}
+        disabled={sending}
+        className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50"
+      >
+        <ThumbsDown size={15} />
+        ยกเลิก
+      </button>
+    </div>
+  )
+}
+
 export function AIChatThread({ compact = false }: { compact?: boolean }) {
-  const { messages, sending, error, send, retry, loadingThread } = useAIChat()
+  const { messages, sending, error, send, retry, loadingThread, pendingAction, confirm, cancel } = useAIChat()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -277,7 +300,11 @@ export function AIChatThread({ compact = false }: { compact?: boolean }) {
               </div>
             ))}
 
-            {!sending && (() => {
+            {!sending && pendingAction && (
+              <ConfirmationButtons onConfirm={confirm} onCancel={cancel} sending={sending} />
+            )}
+
+            {!sending && !pendingAction && (() => {
               const actions = getSuggestedActions(messages)
               if (actions.length === 0) return null
               return <SuggestedActions actions={actions} onAction={send} />

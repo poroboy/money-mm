@@ -73,7 +73,7 @@ export const aiTools: ToolDefinition[] = [
   },
   {
     name: 'delete_item',
-    description: 'ลบรายการออกจาก collection ด้วย id — ต้องถามยืนยันกับผู้ใช้ก่อนเรียกเครื่องมือนี้เสมอ',
+    description: 'ลบรายการออกจาก collection ด้วย id — ห้ามใช้เอง ให้ใช้ request_confirmation ให้ผู้ใช้ยืนยันก่อน',
     input_schema: {
       type: 'object',
       properties: {
@@ -167,6 +167,23 @@ export const aiTools: ToolDefinition[] = [
       'เรียกก่อนสรุปคำแนะนำการเงินทุกครั้ง เพื่อให้คำแนะนำที่ตรงจุด',
     ].join(' '),
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'request_confirmation',
+    description: [
+      'ใช้เมื่อต้องการให้ผู้ใช้ยืนยันก่อนดำเนินการที่สำคัญ โดยเฉพาะการลบข้อมูล',
+      'ส่ง action และ args ของเครื่องมือที่ต้องการให้ผู้ใช้ยืนยัน',
+      'อย่าใช้เครื่องมือนี้แทนการถามคำถามปกติ ให้ใช้เฉพาะตอนที่ต้องยืนยันการเปลี่ยนแปลงข้อมูลเท่านั้น',
+    ].join(' '),
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'ชื่อเครื่องมือที่ต้องการให้ผู้ใช้ยืนยัน เช่น delete_item' },
+        args: { type: 'object', description: 'arguments ที่จะส่งให้เครื่องมือนั้น' },
+        summary: { type: 'string', description: 'ข้อความสั้นๆ อธิบายสิ่งที่กำลังจะทำ' },
+      },
+      required: ['action', 'args'],
+    },
   },
   {
     name: 'what_if_simulation',
