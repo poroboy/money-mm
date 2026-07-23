@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, orderBy, query, limit, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDocs, orderBy, query, limit, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { sendChatMessage, textOf, type ChatMessage, type PendingAction } from '../lib/ai/client'
 import { buildFinancialContext } from '../lib/ai/context'
@@ -181,9 +181,14 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     setMessages([])
     setError('')
     setPendingAction(null)
-    threadIdRef.current = null
     setLastUserText('')
-  }, [])
+    initialLoadDone.current = false
+    const tid = threadIdRef.current
+    threadIdRef.current = null
+    if (user && tid) {
+      void deleteDoc(doc(db, 'users', user.uid, 'chatThreads', tid))
+    }
+  }, [user])
 
   const value = useMemo<AIChatValue>(() => ({
     messages, sending, error, send, retry, clearConversation, loadingThread, widgetOpen, setWidgetOpen, pendingAction, confirm, cancel,
