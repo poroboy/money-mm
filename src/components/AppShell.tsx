@@ -1,10 +1,12 @@
-import { BarChart3, CalendarCheck2, CalendarRange, CreditCard, HandCoins, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, Target, WalletCards, X } from 'lucide-react'
+import { BarChart3, CalendarCheck2, CalendarRange, CreditCard, HandCoins, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, Sparkles, Target, WalletCards, X } from 'lucide-react'
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { AIChatWidget } from './AIChatWidget'
 
 const links = [
   { to: '/dashboard', label: 'ภาพรวม', icon: LayoutDashboard },
+  { to: '/ai', label: 'ผู้ช่วย AI', icon: Sparkles },
   { to: '/payments', label: 'รายการที่ต้องจ่าย', icon: CalendarCheck2 },
   { to: '/goals', label: 'วางแผนการเงิน', icon: Target },
   { to: '/incomes', label: 'รายรับ', icon: HandCoins },
@@ -17,6 +19,7 @@ const links = [
 
 export function AppShell() {
   const { user, logout } = useAuth()
+  const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
   return <div className="min-h-screen lg:grid lg:grid-cols-[250px_1fr]">
     {open && <button className="fixed inset-0 z-30 bg-slate-950/30 lg:hidden" onClick={() => setOpen(false)} aria-label="ปิดเมนู"/>}
@@ -26,5 +29,6 @@ export function AppShell() {
       <div className="mt-auto border-t border-white/10 pt-4"><div className="mb-3 flex items-center gap-3 px-2"><img src={user?.photoURL ?? ''} className="size-9 rounded-full bg-white/10" alt=""/><div className="min-w-0"><p className="truncate text-sm font-semibold">{user?.displayName}</p><p className="truncate text-xs text-white/45">{user?.email}</p></div></div><button onClick={logout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-white/65 hover:bg-white/10 hover:text-white"><LogOut size={18}/>ออกจากระบบ</button></div>
     </aside>
     <main className="min-w-0"><header className="sticky top-0 z-20 flex h-16 items-center border-b border-black/5 bg-[#f4f6f1]/90 px-4 backdrop-blur lg:hidden"><button className="rounded-xl bg-white p-2 shadow-sm" onClick={() => setOpen(true)}><Menu/></button><p className="ml-3 font-bold">Money MM</p></header><div className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-10"><Outlet/></div></main>
+    {pathname !== '/ai' && <AIChatWidget />}
   </div>
 }
